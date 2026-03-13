@@ -1,0 +1,16 @@
+# Rust build artifacts
+/target/
+
+# Environment and local config
+.env
+.env.*
+!.env.example
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs
+*.log
