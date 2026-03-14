@@ -116,41 +116,72 @@ impl AptosClient {
             }
         });
 
-        let resp = self
-            .http
-            .post(&self.graphql_url)
-            .json(&body)
-            .send()
-            .await
-            .context("failed to call Aptos GraphQL indexer")?
-            .error_for_status()
-            .context("Aptos GraphQL indexer returned error status")?;
+        for attempt in 0..=self.max_retries {
+            if self.rest_request_delay_ms > 0 {
+                sleep(Duration::from_millis(self.rest_request_delay_ms)).await;
+            }
 
-        let payload: GraphQlResponse = resp
-            .json()
-            .await
-            .context("failed to decode GraphQL payload")?;
+            let resp = self
+                .http
+                .post(&self.graphql_url)
+                .json(&body)
+                .send()
+                .await
+                .context("failed to call Aptos GraphQL indexer")?;
 
-        if let Some(errors) = payload.errors {
-            let joined = errors
-                .into_iter()
-                .map(|e| e.message)
-                .collect::<Vec<_>>()
-                .join("; ");
-            return Err(anyhow!("GraphQL errors: {joined}"));
+            if resp.status().is_success() {
+                let payload: GraphQlResponse = resp
+                    .json()
+                    .await
+                    .context("failed to decode GraphQL payload")?;
+
+                if let Some(errors) = payload.errors {
+                    let joined = errors
+                        .into_iter()
+                        .map(|e| e.message)
+                        .collect::<Vec<_>>()
+                        .join("; ");
+                    return Err(anyhow!("GraphQL errors: {joined}"));
+                }
+
+                let Some(data) = payload.data else {
+                    return Ok(Vec::new());
+                };
+
+                let versions = data
+                    .account_transactions
+                    .into_iter()
+                    .map(|row| parse_i64_value(&row.transaction_version, "transaction_version"))
+                    .collect::<Result<Vec<_>>>()?;
+
+                return Ok(versions);
+            }
+
+            let status = resp.status();
+            if should_retry(status) && attempt < self.max_retries {
+                let retry_after_ms = parse_retry_after_ms(resp.headers().get("retry-after"));
+                let backoff_ms = compute_backoff_ms(self.retry_base_delay_ms, attempt);
+                let wait_ms = retry_after_ms.unwrap_or(backoff_ms);
+                eprintln!(
+                    "Rate-limited/error on GraphQL versions (status {}), retrying in {} ms (attempt {}/{})",
+                    status,
+                    wait_ms,
+                    attempt + 1,
+                    self.max_retries
+                );
+                sleep(Duration::from_millis(wait_ms)).await;
+                continue;
+            }
+
+            return Err(anyhow!(
+                "Aptos GraphQL indexer returned error status: HTTP {}",
+                status
+            ));
         }
 
-        let Some(data) = payload.data else {
-            return Ok(Vec::new());
-        };
-
-        let versions = data
-            .account_transactions
-            .into_iter()
-            .map(|row| parse_i64_value(&row.transaction_version, "transaction_version"))
-            .collect::<Result<Vec<_>>>()?;
-
-        Ok(versions)
+        Err(anyhow!(
+            "retry loop exhausted unexpectedly for GraphQL versions fetch"
+        ))
     }
 
     pub async fn fetch_transaction(&self, version: i64) -> Result<RestTransaction> {
