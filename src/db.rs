@@ -135,5 +135,149 @@ pub async fn init_schema(pool: &Pool<Postgres>) -> Result<()> {
     .await
     .context("failed to create settlement_approvals")?;
 
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS juror_registrations (
+            txn_version BIGINT NOT NULL,
+            event_index INTEGER NOT NULL,
+            juror_address TEXT NOT NULL,
+            category TEXT NOT NULL,
+            action TEXT NOT NULL,
+            timestamp_onchain BIGINT NOT NULL,
+            inserted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (txn_version, event_index)
+        );
+        "#,
+    )
+        .execute(&mut *conn)
+    .await
+    .context("failed to create juror_registrations")?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS submissions (
+            txn_version BIGINT NOT NULL,
+            event_index INTEGER NOT NULL,
+            room_id BIGINT NOT NULL,
+            contributor_address TEXT NOT NULL,
+            submission_hash TEXT NOT NULL,
+            timestamp_onchain BIGINT NOT NULL,
+            inserted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (txn_version, event_index)
+        );
+        "#,
+    )
+        .execute(&mut *conn)
+    .await
+    .context("failed to create submissions")?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS jury_assignments (
+            txn_version BIGINT NOT NULL,
+            event_index INTEGER NOT NULL,
+            room_id BIGINT NOT NULL,
+            jurors JSONB NOT NULL,
+            timestamp_onchain BIGINT NOT NULL,
+            inserted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (txn_version, event_index)
+        );
+        "#,
+    )
+        .execute(&mut *conn)
+    .await
+    .context("failed to create jury_assignments")?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS votes (
+            txn_version BIGINT NOT NULL,
+            event_index INTEGER NOT NULL,
+            room_id BIGINT NOT NULL,
+            juror_address TEXT NOT NULL,
+            vote_type TEXT NOT NULL,
+            commit_hash TEXT,
+            score BIGINT,
+            timestamp_onchain BIGINT NOT NULL,
+            inserted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (txn_version, event_index)
+        );
+        "#,
+    )
+        .execute(&mut *conn)
+    .await
+    .context("failed to create votes")?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS variance_flags (
+            txn_version BIGINT NOT NULL,
+            event_index INTEGER NOT NULL,
+            room_id BIGINT NOT NULL,
+            juror_address TEXT NOT NULL,
+            score BIGINT NOT NULL,
+            min_distance BIGINT NOT NULL,
+            timestamp_onchain BIGINT NOT NULL,
+            inserted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (txn_version, event_index)
+        );
+        "#,
+    )
+        .execute(&mut *conn)
+    .await
+    .context("failed to create variance_flags")?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS final_scores (
+            txn_version BIGINT PRIMARY KEY,
+            room_id BIGINT NOT NULL,
+            jury_score BIGINT NOT NULL,
+            timestamp_onchain BIGINT NOT NULL,
+            inserted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        "#,
+    )
+        .execute(&mut *conn)
+    .await
+    .context("failed to create final_scores")?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS escrow_movements (
+            txn_version BIGINT NOT NULL,
+            event_index INTEGER NOT NULL,
+            room_id BIGINT NOT NULL,
+            address TEXT NOT NULL,
+            movement_type TEXT NOT NULL,
+            amount BIGINT NOT NULL,
+            timestamp_onchain BIGINT NOT NULL,
+            inserted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (txn_version, event_index)
+        );
+        "#,
+    )
+        .execute(&mut *conn)
+    .await
+    .context("failed to create escrow_movements")?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS zero_vote_refunds (
+            txn_version BIGINT NOT NULL,
+            event_index INTEGER NOT NULL,
+            room_id BIGINT NOT NULL,
+            client_address TEXT NOT NULL,
+            refund_amount BIGINT NOT NULL,
+            timestamp_onchain BIGINT NOT NULL,
+            inserted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (txn_version, event_index)
+        );
+        "#,
+    )
+        .execute(&mut *conn)
+    .await
+    .context("failed to create zero_vote_refunds")?;
+
     Ok(())
 }

@@ -202,6 +202,50 @@ async fn apply_projection(
         return handle_room_settled(tx, txn_version, &event.data).await;
     }
 
+    if event_type.ends_with("::juror_registry::jurorregistered") {
+        return handle_juror_registered(tx, txn_version, event_index, &event.data).await;
+    }
+
+    if event_type.ends_with("::juror_registry::jurorunregistered") {
+        return handle_juror_unregistered(tx, txn_version, event_index, &event.data).await;
+    }
+
+    if event_type.ends_with("::submission::submissioncreated") {
+        return handle_submission_created(tx, txn_version, event_index, &event.data).await;
+    }
+
+    if event_type.ends_with("::jury::juryassigned") {
+        return handle_jury_assigned(tx, txn_version, event_index, &event.data).await;
+    }
+
+    if event_type.ends_with("::jury::votecommitted") {
+        return handle_vote_committed(tx, txn_version, event_index, &event.data).await;
+    }
+
+    if event_type.ends_with("::jury::voterevealed") {
+        return handle_vote_revealed(tx, txn_version, event_index, &event.data).await;
+    }
+
+    if event_type.ends_with("::variance::varianceflagged") {
+        return handle_variance_flagged(tx, txn_version, event_index, &event.data).await;
+    }
+
+    if event_type.ends_with("::settlement::scoresfinalized") {
+        return handle_scores_finalized(tx, txn_version, &event.data).await;
+    }
+
+    if event_type.ends_with("::vault::escrowdeposited") {
+        return handle_escrow_deposited(tx, txn_version, event_index, &event.data).await;
+    }
+
+    if event_type.ends_with("::vault::escrowreleased") {
+        return handle_escrow_released(tx, txn_version, event_index, &event.data).await;
+    }
+
+    if event_type.ends_with("::room::roomzerouotesrefunded") {
+        return handle_room_zero_votes_refunded(tx, txn_version, event_index, &event.data).await;
+    }
+
     Ok(())
 }
 
@@ -477,6 +521,419 @@ async fn handle_room_settled(
     .execute(&mut **tx)
     .await
     .context("failed updating room terminal state")?;
+
+    Ok(())
+}
+
+async fn handle_juror_registered(
+    tx: &mut Transaction<'_, Postgres>,
+    txn_version: i64,
+    event_index: i32,
+    data: &Value,
+) -> Result<()> {
+    let juror_address = read_string(data, "juror")?.to_lowercase();
+    let category = read_string(data, "category")?;
+    let timestamp_onchain = read_i64(data, "timestamp")?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO juror_registrations (
+            txn_version,
+            event_index,
+            juror_address,
+            category,
+            action,
+            timestamp_onchain
+        )
+        VALUES ($1, $2, $3, $4, 'registered', $5)
+        ON CONFLICT (txn_version, event_index) DO NOTHING
+        "#,
+    )
+    .bind(txn_version)
+    .bind(event_index)
+    .bind(juror_address)
+    .bind(category)
+    .bind(timestamp_onchain)
+    .execute(&mut **tx)
+    .await
+    .context("failed handling JurorRegistered")?;
+
+    Ok(())
+}
+
+async fn handle_juror_unregistered(
+    tx: &mut Transaction<'_, Postgres>,
+    txn_version: i64,
+    event_index: i32,
+    data: &Value,
+) -> Result<()> {
+    let juror_address = read_string(data, "juror")?.to_lowercase();
+    let category = read_string(data, "category")?;
+    let timestamp_onchain = read_i64(data, "timestamp")?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO juror_registrations (
+            txn_version,
+            event_index,
+            juror_address,
+            category,
+            action,
+            timestamp_onchain
+        )
+        VALUES ($1, $2, $3, $4, 'unregistered', $5)
+        ON CONFLICT (txn_version, event_index) DO NOTHING
+        "#,
+    )
+    .bind(txn_version)
+    .bind(event_index)
+    .bind(juror_address)
+    .bind(category)
+    .bind(timestamp_onchain)
+    .execute(&mut **tx)
+    .await
+    .context("failed handling JurorUnregistered")?;
+
+    Ok(())
+}
+
+async fn handle_submission_created(
+    tx: &mut Transaction<'_, Postgres>,
+    txn_version: i64,
+    event_index: i32,
+    data: &Value,
+) -> Result<()> {
+    let room_id = read_i64(data, "room_id")?;
+    let contributor_address = read_string(data, "contributor")?.to_lowercase();
+    let submission_hash = read_string(data, "submission_hash")?;
+    let timestamp_onchain = read_i64(data, "timestamp")?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO submissions (
+            txn_version,
+            event_index,
+            room_id,
+            contributor_address,
+            submission_hash,
+            timestamp_onchain
+        )
+        VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (txn_version, event_index) DO NOTHING
+        "#,
+    )
+    .bind(txn_version)
+    .bind(event_index)
+    .bind(room_id)
+    .bind(contributor_address)
+    .bind(submission_hash)
+    .bind(timestamp_onchain)
+    .execute(&mut **tx)
+    .await
+    .context("failed handling SubmissionCreated")?;
+
+    Ok(())
+}
+
+async fn handle_jury_assigned(
+    tx: &mut Transaction<'_, Postgres>,
+    txn_version: i64,
+    event_index: i32,
+    data: &Value,
+) -> Result<()> {
+    let room_id = read_i64(data, "room_id")?;
+    let timestamp_onchain = read_i64(data, "timestamp")?;
+    
+    let jurors_json = serde_json::to_value(&data.get("jurors"))?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO jury_assignments (
+            txn_version,
+            event_index,
+            room_id,
+            jurors,
+            timestamp_onchain
+        )
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (txn_version, event_index) DO NOTHING
+        "#,
+    )
+    .bind(txn_version)
+    .bind(event_index)
+    .bind(room_id)
+    .bind(jurors_json)
+    .bind(timestamp_onchain)
+    .execute(&mut **tx)
+    .await
+    .context("failed handling JuryAssigned")?;
+
+    Ok(())
+}
+
+async fn handle_vote_committed(
+    tx: &mut Transaction<'_, Postgres>,
+    txn_version: i64,
+    event_index: i32,
+    data: &Value,
+) -> Result<()> {
+    let room_id = read_i64(data, "room_id")?;
+    let juror_address = read_string(data, "juror")?.to_lowercase();
+    let commit_hash = read_string(data, "commit_hash")?;
+    let timestamp_onchain = read_i64(data, "timestamp")?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO votes (
+            txn_version,
+            event_index,
+            room_id,
+            juror_address,
+            vote_type,
+            commit_hash,
+            timestamp_onchain
+        )
+        VALUES ($1, $2, $3, $4, 'committed', $5, $6)
+        ON CONFLICT (txn_version, event_index) DO NOTHING
+        "#,
+    )
+    .bind(txn_version)
+    .bind(event_index)
+    .bind(room_id)
+    .bind(juror_address)
+    .bind(commit_hash)
+    .bind(timestamp_onchain)
+    .execute(&mut **tx)
+    .await
+    .context("failed handling VoteCommitted")?;
+
+    Ok(())
+}
+
+async fn handle_vote_revealed(
+    tx: &mut Transaction<'_, Postgres>,
+    txn_version: i64,
+    event_index: i32,
+    data: &Value,
+) -> Result<()> {
+    let room_id = read_i64(data, "room_id")?;
+    let juror_address = read_string(data, "juror")?.to_lowercase();
+    let score = read_i64(data, "score")?;
+    let timestamp_onchain = read_i64(data, "timestamp")?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO votes (
+            txn_version,
+            event_index,
+            room_id,
+            juror_address,
+            vote_type,
+            score,
+            timestamp_onchain
+        )
+        VALUES ($1, $2, $3, $4, 'revealed', $5, $6)
+        ON CONFLICT (txn_version, event_index) DO NOTHING
+        "#,
+    )
+    .bind(txn_version)
+    .bind(event_index)
+    .bind(room_id)
+    .bind(juror_address)
+    .bind(score)
+    .bind(timestamp_onchain)
+    .execute(&mut **tx)
+    .await
+    .context("failed handling VoteRevealed")?;
+
+    Ok(())
+}
+
+async fn handle_variance_flagged(
+    tx: &mut Transaction<'_, Postgres>,
+    txn_version: i64,
+    event_index: i32,
+    data: &Value,
+) -> Result<()> {
+    let room_id = read_i64(data, "room_id")?;
+    let juror_address = read_string(data, "juror")?.to_lowercase();
+    let score = read_i64(data, "score")?;
+    let min_distance = read_i64(data, "min_distance")?;
+    let timestamp_onchain = read_i64(data, "timestamp")?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO variance_flags (
+            txn_version,
+            event_index,
+            room_id,
+            juror_address,
+            score,
+            min_distance,
+            timestamp_onchain
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ON CONFLICT (txn_version, event_index) DO NOTHING
+        "#,
+    )
+    .bind(txn_version)
+    .bind(event_index)
+    .bind(room_id)
+    .bind(juror_address)
+    .bind(score)
+    .bind(min_distance)
+    .bind(timestamp_onchain)
+    .execute(&mut **tx)
+    .await
+    .context("failed handling VarianceFlagged")?;
+
+    Ok(())
+}
+
+async fn handle_scores_finalized(
+    tx: &mut Transaction<'_, Postgres>,
+    txn_version: i64,
+    data: &Value,
+) -> Result<()> {
+    let room_id = read_i64(data, "room_id")?;
+    let jury_score = read_i64(data, "jury_score")?;
+    let timestamp_onchain = read_i64(data, "timestamp")?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO final_scores (
+            txn_version,
+            room_id,
+            jury_score,
+            timestamp_onchain
+        )
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (txn_version) DO NOTHING
+        "#,
+    )
+    .bind(txn_version)
+    .bind(room_id)
+    .bind(jury_score)
+    .bind(timestamp_onchain)
+    .execute(&mut **tx)
+    .await
+    .context("failed handling ScoresFinalized")?;
+
+    Ok(())
+}
+
+async fn handle_escrow_deposited(
+    tx: &mut Transaction<'_, Postgres>,
+    txn_version: i64,
+    event_index: i32,
+    data: &Value,
+) -> Result<()> {
+    let room_id = read_i64(data, "room_id")?;
+    let depositor_address = read_string(data, "depositor")?.to_lowercase();
+    let amount = read_i64(data, "amount")?;
+    let timestamp_onchain = read_i64(data, "timestamp")?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO escrow_movements (
+            txn_version,
+            event_index,
+            room_id,
+            address,
+            movement_type,
+            amount,
+            timestamp_onchain
+        )
+        VALUES ($1, $2, $3, $4, 'deposited', $5, $6)
+        ON CONFLICT (txn_version, event_index) DO NOTHING
+        "#,
+    )
+    .bind(txn_version)
+    .bind(event_index)
+    .bind(room_id)
+    .bind(depositor_address)
+    .bind(amount)
+    .bind(timestamp_onchain)
+    .execute(&mut **tx)
+    .await
+    .context("failed handling EscrowDeposited")?;
+
+    Ok(())
+}
+
+async fn handle_escrow_released(
+    tx: &mut Transaction<'_, Postgres>,
+    txn_version: i64,
+    event_index: i32,
+    data: &Value,
+) -> Result<()> {
+    let room_id = read_i64(data, "room_id")?;
+    let recipient_address = read_string(data, "recipient")?.to_lowercase();
+    let amount = read_i64(data, "amount")?;
+    let timestamp_onchain = read_i64(data, "timestamp")?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO escrow_movements (
+            txn_version,
+            event_index,
+            room_id,
+            address,
+            movement_type,
+            amount,
+            timestamp_onchain
+        )
+        VALUES ($1, $2, $3, $4, 'released', $5, $6)
+        ON CONFLICT (txn_version, event_index) DO NOTHING
+        "#,
+    )
+    .bind(txn_version)
+    .bind(event_index)
+    .bind(room_id)
+    .bind(recipient_address)
+    .bind(amount)
+    .bind(timestamp_onchain)
+    .execute(&mut **tx)
+    .await
+    .context("failed handling EscrowReleased")?;
+
+    Ok(())
+}
+
+async fn handle_room_zero_votes_refunded(
+    tx: &mut Transaction<'_, Postgres>,
+    txn_version: i64,
+    event_index: i32,
+    data: &Value,
+) -> Result<()> {
+    let room_id = read_i64(data, "room_id")?;
+    let client_address = read_string(data, "client")?.to_lowercase();
+    let refund_amount = read_i64(data, "refund_amount")?;
+    let timestamp_onchain = read_i64(data, "timestamp")?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO zero_vote_refunds (
+            txn_version,
+            event_index,
+            room_id,
+            client_address,
+            refund_amount,
+            timestamp_onchain
+        )
+        VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (txn_version, event_index) DO NOTHING
+        "#,
+    )
+    .bind(txn_version)
+    .bind(event_index)
+    .bind(room_id)
+    .bind(client_address)
+    .bind(refund_amount)
+    .bind(timestamp_onchain)
+    .execute(&mut **tx)
+    .await
+    .context("failed handling RoomZeroVotesRefunded")?;
 
     Ok(())
 }
