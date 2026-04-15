@@ -64,7 +64,7 @@ impl AptosClient {
     pub fn new(cfg: &Config) -> Result<Self> {
         let mut headers = HeaderMap::new();
         if let Some(api_key) = cfg.aptos_api_key.as_deref() {
-            headers.insert("x-api-key", HeaderValue::from_str(api_key)?);
+            headers.insert("x-aptos-api-key", HeaderValue::from_str(api_key)?);
             headers.insert(
                 AUTHORIZATION,
                 HeaderValue::from_str(&format!("Bearer {api_key}"))?,
